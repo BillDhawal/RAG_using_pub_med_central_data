@@ -9,22 +9,20 @@ def load_pubmed_data(
     start_idx: int = 500, num_samples: int = 100
 ) -> List[Dict[str, Any]]:
     try:
-        dataset = load_dataset("MedRAG/pubmed", split="train", streaming=True)
+        dataset = load_dataset("DhruvDancingBuddha/osho_discourses", split="train", streaming=True)
 
-        # Take only the specified samples
-        subset = dataset.skip(start_idx).take(num_samples)
 
         # Convert to list for easy access
-        subset_list = list(subset)
+        subset_list = list(dataset)
 
         # Format documents with consistent structure
         documents = [
             {
-                "id": item["id"],
-                "title": item["title"],
-                "content": item["content"],
-                "contents": item["contents"],
-                "PMID": item["PMID"],
+                "id": item["char_url"],
+                "title": item["topic_name"],
+                "content": item["all_txt"],
+                "contents": item["topic_lesson_url"],
+                "PMID": item["char_url"],
             }
             for item in subset_list
         ]

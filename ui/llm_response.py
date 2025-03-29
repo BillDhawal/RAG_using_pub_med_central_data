@@ -56,22 +56,16 @@ def format_chat_history(messages: List[Dict[str, str]]) -> List:
 # RAG instance is sent as a parameter to this function, such that RAG is initialized only once.
 def get_llm_response(
     user_input: str, rag_instance: PubMedRAG, chat_history: List[Dict[str, str]] = None
-) -> str:
+):
     try:
         logger.debug("Processing user input for LLM response")
         # Initialize chat history if needed
         if chat_history is None:
             chat_history = []
 
-        response = rag_instance.query(user_input)
-
-        # Check
-        # formatted_messages = format_chat_history(chat_history)
-        # formatted_messages.append(HumanMessage(content=user_input))
-        # formatted_messages.append(AIMessage(content=response))
-        return response
-
+        # Stream the response from the RAG instance
+        for chunk in rag_instance.query_stream(user_input):
+            yield chunk  # Yield each chunk as it is received
     except Exception as e:
         logger.error(f"Error in get_llm_response: {str(e)}", exc_info=True)
-        error_msg = f"An error occurred: {str(e)}"
-        return error_msg
+        yield f"Error generating response: {str(e)}"

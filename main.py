@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import os
 import logging
+import textwrap
 
 # Configure logging - simplified
 logging.basicConfig(
@@ -23,6 +24,23 @@ from ui.llm_response import get_llm_response, get_rag_instance
 # Define the path for storing chat history
 CHAT_HISTORY_FILE = "chat_history.json"
 
+
+def chunk_text(text, chunk_size=5000, overlap=100):
+    chunks = []
+    text_length = len(text)
+
+    # Iterate through the text with the specified chunk size and overlap
+    for i in range(0, text_length, chunk_size - overlap):
+        chunk = text[i : i + chunk_size]
+        if chunk.strip():  # Check if the chunk is not empty after stripping whitespace
+            chunks.append(chunk)
+
+    # Debug log: Print the size of the chunks list and an example chunk
+    logger.debug(f"Total chunks created: {len(chunks)}")
+    if chunks:
+        logger.debug(f"Example chunk: {chunks[0]}")
+
+    return chunks
 
 def load_chat_history():
     """Load chat history from file or initialize if not exists."""
@@ -77,34 +95,38 @@ def create_new_vector_store(
 ):
     try:
         documents = load_pubmed_data(start_idx, num_samples)
-
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        data = []
         # Add a check out of all documents which have PMID value.
         for doc in documents:
             if not doc.get("PMID"):
                 print(f"Document with ID {doc['id']} does not have a PMID value.")
                 continue
-
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        texts = [doc["content"] for doc in documents]
-        embeddings = model.encode(texts).tolist()
-        data = []
-        for doc, embedding in zip(documents, embeddings):
-            record = {
-                "title": doc["title"],
-                "pmid": str(doc["PMID"]),
-                "content": doc["content"],
-                "metadata": {"original_id": doc["id"], "contents": doc["contents"]},
-                "embedding": embedding,
-            }
-            data.append(record)
-
-        # Insert data into Supabase table
-        result = supabase_instance.table("pubmed_documents").insert(data).execute()
-        print(f"Inserted document with title: {['title']}")
-
+            chunks = chunk_text(doc["content"])
+            logger.debug(f"Total chunks for document ID {doc['id']}: {len(chunks)}")
+            for idx, chunk in enumerate(chunks):
+                embedding = model.encode(chunk).tolist()
+                record = {
+                    "title": doc["title"],
+                    "pmid": str(doc["PMID"]),
+                    "content": chunk,  # Store the chunked content
+                    "chunk_id": idx,  # Track chunk order
+                    "metadata": {"original_id": doc["id"], "total_chunks": len(chunks)},
+                    "embedding": embedding,
+                }
+                data.append(record)
+        logger.debug(f"Total records prepared for insertion: {len(data)}")
+        batch_size = 50
+        for i in range(0, len(data), batch_size):
+            batch = data[i : i + batch_size]
+            logger.debug(f"Processing batch {i // batch_size + 1}, Batch size: {len(batch)}")
+            try:
+                result = supabase_instance.table("pubmed_documents").upsert(batch).execute()
+                print(f"Inserted batch {i//batch_size + 1}")
+            except Exception as e:
+                print(f"Error inserting batch {i//batch_size + 1}: {e}")
     except Exception as e:
         print(f"Error inserting chunk: {e}")
-
 
 def main():
     # TODO : Add Streaming of text
@@ -194,14 +216,20 @@ def main():
         # Takes the RAG instance
         ## TODO: Enhancement : Add text Streaming
         with st.spinner("Researching PubMed articles..."):
-            response = get_llm_response(
+            response_content = ""  # Initialize an empty string to accumulate the response
+            response_placeholder = st.empty()  # Create a placeholder for streaming response
+
+            # Stream the response and update the placeholder
+            for chunk in get_llm_response(
                 user_input,
                 st.session_state.rag_instance,
                 st.session_state.chat_history[:-1],
-            )
+            ):
+                response_content += chunk  # Accumulate the streamed content
+                response_placeholder.text(response_content)  # Update the placeholder with the current content
 
-        # Add assistant response to chat history
-        st.session_state.chat_history.append({"role": "assistant", "content": response})
+            # Add the final response to the chat history
+            st.session_state.chat_history.append({"role": "assistant", "content": response_content})
 
         # Save updated chat history to file
         save_chat_history(st.session_state.chat_history)

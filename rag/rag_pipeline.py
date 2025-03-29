@@ -14,6 +14,8 @@ from sentence_transformers import SentenceTransformer
 from langchain_community.vectorstores import SupabaseVectorStore
 from typing import Optional
 
+RECURSION_LIMIT = 2 * 5 + 1
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -42,6 +44,26 @@ class MyRetriever(BaseRetriever):
 
 class PubMedRAG:
 
+    def _extract_tool_outputs(self, agent_result):
+        """Helper method to extract relevant information from agent result"""
+        collected_info = ""
+        
+        if "intermediate_steps" in agent_result:
+            for step in agent_result["intermediate_steps"]:
+                # Extract the query/action that was sent to the tool
+                if "tool_input" in step:
+                    collected_info += f"Tool query: {step['tool_input']}\n"
+                elif "action" in step and "action_input" in step["action"]:
+                    collected_info += f"Tool query: {step['action']['action_input']}\n"
+                
+                # Extract the tool output
+                if "tool_output" in step:
+                    collected_info += f"Tool output: {step['tool_output']}\n\n"
+                elif "observation" in step:
+                    collected_info += f"Tool output: {step['observation']}\n\n"
+        
+        return collected_info
+    
     def __init__(self, supabase_client):
         # Initialize components as None
         self.llm = None
@@ -60,7 +82,7 @@ class PubMedRAG:
             table_name="pubmed_documents",
             query_name="match_documents",
         )
-        supabase_vs_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        supabase_vs_retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
         retriever = MyRetriever()
 
@@ -94,15 +116,47 @@ class PubMedRAG:
         self.llm = create_llama_chat_model()
 
     def query(self, question: str) -> str:
-
         logger.debug(f"Processing RAG query: {question[:50]}...")
 
         if not self.rag_chain:
             raise ValueError("RAG chain not initialized. Call initialize() first.")
 
         try:
-            messages = self.rag_chain.invoke({"messages": [("human", question)]})
-            return messages["messages"][-1].content
+            # Use streaming to process the query
+            response_content = ""
+            for chunk in self.rag_chain.stream({"messages": [("human", question)]}, {"recursion_limit": RECURSION_LIMIT},):
+                response_content += chunk["content"]  # Accumulate the streamed content
+
+            return response_content
         except Exception as e:
-            logger.error(f"3.E2 Error in RAG query: {str(e)}", exc_info=True)
+            logger.error(f"Error in RAG query: {str(e)}", exc_info=True)
             return f"Error generating response: {str(e)}"
+
+    def query_stream(self, question: str):
+        logger.debug(f"Streaming RAG query: {question[:50]}...")
+
+        if not self.rag_chain:
+            raise ValueError("RAG chain not initialized. Call initialize() first.")
+
+        try:
+            # First collect all information without streaming
+            agent_result = self.rag_chain.invoke({"messages": [("human", question)]})
+            
+            # Check if reached max iterations and summarize
+            collected_info = self._extract_tool_outputs(agent_result)
+            
+            summarization_prompt = f"""
+            Based on the following information collected about the query: "{question}"
+            
+            {collected_info}
+            
+            Please provide a concise and accurate summary that directly answers the user's question.
+            """
+            
+            # Stream the summarization
+            for chunk in self.llm.stream(summarization_prompt):
+                yield chunk.content
+                
+        except Exception as e:
+            logger.error(f"Error in RAG query stream: {str(e)}", exc_info=True)
+            yield f"Error generating response: {str(e)}"

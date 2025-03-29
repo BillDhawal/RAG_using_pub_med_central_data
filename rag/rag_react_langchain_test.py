@@ -104,17 +104,17 @@ retriever = MyRetriever()
 retrieval_tool = create_retriever_tool(
     retriever=retriever,
     name="my_retriever",
-    description="A tool to retrieve documents from my knowledge base created from PubMedCentral Database.",
+    description="A tool to retrieve documents from my knowledge base created on OSHO discourse .",
 )
 
 # print(retrieval_tool.invoke("Lysosomal hydrolases of the epidermis , why is it used?"))
 
-system_message = "You are a medical research assistant with expertise in analyzing PubMed papers. Use the following pieces of context from research papers to answer the user's question. If you don't know the answer, just say you don't know. Don't try to make up an answer But help the user with the information that you got from the retrieval"
+system_message = "You are an research assistant with expertise in going through the RAG trained on osho discourse. Use the following pieces of context from discource to answer the user's question. If you don't know the answer, just say you don't know. Don't try to make up an answer But help the user with the information that you got from the retrieval"
 
 wiki_retriever = create_retriever_tool(
     retriever=WikipediaRetriever(),
     name="wikipedia_retriever",
-    description="Wikipedia retriever to search for medical terms and helping for information which is not in the knowledge base.",
+    description="Wikipedia retriever to search for terms and helping for information which is not in the knowledge base.",
 )
 
 langgraph_agent = create_react_agent(
@@ -160,7 +160,7 @@ def process_chunks(chunk):
                     tool_query = tool_arguments["query"]
 
                     rich.print(
-                        f"\nThe agent is calling the tool [on deep_sky_blue1]{tool_name}[/on deep_sky_blue1] "
+                        f"\nThe tool called: [on deep_sky_blue1]{tool_name}[/on deep_sky_blue1] "
                         f"with the query: [on deep_sky_blue1]{tool_query}[/on deep_sky_blue1]."
                         f" Please wait for the tool's response...",
                         style="deep_sky_blue1",
